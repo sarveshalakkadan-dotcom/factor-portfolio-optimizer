@@ -6,7 +6,6 @@ Run with: streamlit run dashboard/app.py
 """
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import streamlit as st
 import pandas as pd
@@ -19,7 +18,7 @@ from optimizer import optimize_portfolio
 from backtest import run_backtest
 from risk_metrics import full_risk_report, to_returns, factor_exposure
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+DATA_DIR = os.path.dirname(__file__)
 
 st.set_page_config(page_title="Factor Portfolio Optimizer", layout="wide")
 

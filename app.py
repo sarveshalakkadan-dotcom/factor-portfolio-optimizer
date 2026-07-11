@@ -66,11 +66,8 @@ max_sector_weight = st.sidebar.slider("Max weight per sector", 0.15, 0.50, 0.30,
 
 st.sidebar.markdown("---")
 st.sidebar.caption(
-   st.sidebar.markdown("---")
-st.sidebar.caption(
     "Data: live equity prices and fundamentals sourced from Yahoo Finance, "
     "covering a 60-stock universe across 7 sectors."
-)
 )
 
 # ---------------- Load & Compute ----------------

@@ -66,10 +66,11 @@ max_sector_weight = st.sidebar.slider("Max weight per sector", 0.15, 0.50, 0.30,
 
 st.sidebar.markdown("---")
 st.sidebar.caption(
-    "Data note: this demo runs on synthetic market data generated to mimic real "
-    "equity behavior (correlated returns, sector structure, factor-linked fundamentals). "
-    "Swap in `src/data_pipeline.py` output for live Yahoo Finance data — everything "
-    "else works unchanged."
+   st.sidebar.markdown("---")
+st.sidebar.caption(
+    "Data: live equity prices and fundamentals sourced from Yahoo Finance, "
+    "covering a 60-stock universe across 7 sectors."
+)
 )
 
 # ---------------- Load & Compute ----------------

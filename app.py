@@ -6,6 +6,10 @@ Run with: streamlit run dashboard/app.py
 """
 import sys
 import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
+# Project root also has the forensic accounting modules (forensic_data_fetch.py,
+# forensic_score.py), which live alongside dashboard/ and src/, not inside them.
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import streamlit as st
 import pandas as pd
@@ -17,8 +21,9 @@ from factor_model import compute_factor_scores
 from optimizer import optimize_portfolio
 from backtest import run_backtest
 from risk_metrics import full_risk_report, to_returns, factor_exposure
+from forensic_score import run_forensic_check
 
-DATA_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 st.set_page_config(page_title="Factor Portfolio Optimizer", layout="wide")
 
@@ -46,6 +51,28 @@ def get_backtest(_prices, _fundamentals, risk_aversion):
     return run_backtest(_prices, _fundamentals, risk_aversion=risk_aversion)
 
 
+@st.cache_data(show_spinner=False)
+def get_forensic_scores(tickers):
+    """
+    Runs the Beneish M-Score forensic accounting screen for each ticker.
+
+    This is a statistical screening tool (Beneish, 1999) that estimates
+    whether a company's financials show patterns associated with earnings
+    manipulation -- it is NOT a fraud accusation or litigation record.
+
+    Cached so this only re-runs when the actual ticker list changes,
+    since each check requires live financial-statement lookups.
+    """
+    results = {}
+    for ticker in tickers:
+        check = run_forensic_check(ticker)
+        if check["insufficient_data"]:
+            results[ticker] = "Insufficient data"
+        else:
+            results[ticker] = f"{check['risk_tier']} ({check['m_score']:.2f})"
+    return results
+
+
 # ---------------- Sidebar Controls ----------------
 st.sidebar.title("Portfolio Controls")
 st.sidebar.markdown("Adjust risk tolerance and constraints to see the portfolio rebuild in real time.")
@@ -66,8 +93,10 @@ max_sector_weight = st.sidebar.slider("Max weight per sector", 0.15, 0.50, 0.30,
 
 st.sidebar.markdown("---")
 st.sidebar.caption(
-    "Data: live equity prices and fundamentals sourced from Yahoo Finance, "
-    "covering a 60-stock universe across 7 sectors."
+    "Data note: this demo runs on synthetic market data generated to mimic real "
+    "equity behavior (correlated returns, sector structure, factor-linked fundamentals). "
+    "Swap in `src/data_pipeline.py` output for live Yahoo Finance data — everything "
+    "else works unchanged."
 )
 
 # ---------------- Load & Compute ----------------
@@ -116,7 +145,41 @@ with tab2:
     st.subheader("All Stocks Ranked by Composite Factor Score")
     display_cols = ["sector", "composite_score", "value_score", "momentum_score",
                      "size_score", "quality_score", "lowvol_score"]
-    st.dataframe(scores[display_cols].round(3), use_container_width=True, height=600)
+
+    run_forensic = st.checkbox(
+        "Run forensic accounting screen (Beneish M-Score)",
+        value=True,
+        help="Pulls live financial statement data per stock, so this may take a "
+             "moment to load the first time for a larger watchlist."
+    )
+
+    display_df = scores[display_cols].round(3).copy()
+
+    if run_forensic:
+        with st.spinner("Running forensic accounting screen across the watchlist..."):
+            forensic_results = get_forensic_scores(tuple(display_df.index))
+        display_df["Forensic Risk Score"] = display_df.index.map(forensic_results)
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            height=600,
+            column_config={
+                "Forensic Risk Score": st.column_config.TextColumn(
+                    "Forensic Risk Score",
+                    help=(
+                        "Based on the Beneish M-Score (Beneish, 1999) — a statistical model "
+                        "using 8 financial-statement ratios that estimates whether a company's "
+                        "numbers show patterns associated with earnings manipulation. This is a "
+                        "screening tool used by analysts and auditors, not an accusation of "
+                        "wrongdoing. 'Elevated' means a statistically higher likelihood based on "
+                        "this model; it does not mean fraud has been found or confirmed."
+                    )
+                )
+            }
+        )
+    else:
+        st.dataframe(display_df, use_container_width=True, height=600)
 
 # ---------------- Tab 3: Backtest ----------------
 with tab3:

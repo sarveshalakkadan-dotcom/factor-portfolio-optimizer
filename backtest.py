@@ -29,7 +29,8 @@ def get_rebalance_dates(prices, freq="ME"):
 
 
 def run_backtest(prices, fundamentals, risk_aversion=3.0, freq="ME",
-                  lookback_buffer=270, cost_bps=10, factor_weights=None):
+                  lookback_buffer=270, cost_bps=10, factor_weights=None,
+                  max_weight_per_stock=0.08, max_weight_per_sector=0.30):
     """
     Walk forward through time, rebalancing monthly.
 
@@ -42,6 +43,14 @@ def run_backtest(prices, fundamentals, risk_aversion=3.0, freq="ME",
                None (default), behaves exactly as before (equal-weight).
                Lets the self-serve "Build Your Own Portfolio" tab backtest
                a user's custom factor tilts, not just the default blend.
+    max_weight_per_stock, max_weight_per_sector : concentration limits
+               passed straight through to optimize_portfolio() at every
+               rebalance. Default to the original hardcoded values (0.08 /
+               0.30) so the main dashboard's behavior is unchanged. Lets
+               the self-serve tab loosen these dynamically for small or
+               sector-concentrated custom watchlists, where the original
+               fixed caps can make the optimizer mathematically infeasible
+               (e.g. 5 stocks can never sum to 100% if each is capped at 8%).
 
     Returns
     -------
@@ -69,7 +78,9 @@ def run_backtest(prices, fundamentals, risk_aversion=3.0, freq="ME",
         try:
             scores = compute_factor_scores(price_hist_to_date, fundamentals,
                                             as_of_date=rebal_date, factor_weights=factor_weights)
-            new_weights = optimize_portfolio(scores, price_hist_to_date, risk_aversion=risk_aversion)
+            new_weights = optimize_portfolio(scores, price_hist_to_date, risk_aversion=risk_aversion,
+                                              max_weight_per_stock=max_weight_per_stock,
+                                              max_weight_per_sector=max_weight_per_sector)
         except Exception as e:
             print(f"  Skipping rebalance at {rebal_date.date()} due to error: {e}")
             new_weights = current_weights if len(current_weights) > 0 else pd.Series(dtype=float)

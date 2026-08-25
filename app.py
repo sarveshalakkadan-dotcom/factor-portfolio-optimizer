@@ -336,14 +336,40 @@ with tab5:
                     custom_scores = compute_factor_scores(
                         custom_prices, custom_fundamentals, factor_weights=custom_factor_weights
                     )
+
+                    # --- Dynamic concentration caps ---
+                    # The main dashboard's fixed caps (8% per stock, 30% per
+                    # sector) assume a ~60-stock universe. A user-pasted
+                    # watchlist can be much smaller or concentrated in one or
+                    # two sectors, which makes those fixed caps mathematically
+                    # infeasible (e.g. 5 stocks can never sum to 100% if each
+                    # is capped at 8%). Rather than just failing, loosen the
+                    # caps just enough to guarantee a feasible solution, with
+                    # a comfortable 50% margin over the tight theoretical bound.
+                    n_stocks = len(custom_scores)
+                    n_sectors = custom_scores["sector"].nunique()
+                    dynamic_max_stock = max(0.08, min(0.50, 1.5 / n_stocks))
+                    dynamic_max_sector = max(0.30, min(0.80, 1.5 / n_sectors))
+
                     custom_weights = optimize_portfolio(
-                        custom_scores, custom_prices, risk_aversion=custom_risk_aversion
+                        custom_scores, custom_prices, risk_aversion=custom_risk_aversion,
+                        max_weight_per_stock=dynamic_max_stock,
+                        max_weight_per_sector=dynamic_max_sector,
                     )
                     custom_backtest = run_backtest(
                         custom_prices, custom_fundamentals,
                         risk_aversion=custom_risk_aversion,
                         factor_weights=custom_factor_weights,
+                        max_weight_per_stock=dynamic_max_stock,
+                        max_weight_per_sector=dynamic_max_sector,
                     )
+                    if dynamic_max_stock > 0.08 or dynamic_max_sector > 0.30:
+                        st.info(
+                            f"Your watchlist ({n_stocks} stocks across {n_sectors} sectors) is smaller "
+                            f"and less diversified than the main 60-stock universe, so concentration caps "
+                            f"were loosened to keep the optimizer feasible: max {dynamic_max_stock*100:.0f}% "
+                            f"per stock, max {dynamic_max_sector*100:.0f}% per sector."
+                        )
                 st.session_state.custom_scores = custom_scores
                 st.session_state.custom_weights = custom_weights
                 st.session_state.custom_backtest = custom_backtest

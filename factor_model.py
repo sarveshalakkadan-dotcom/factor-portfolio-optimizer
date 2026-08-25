@@ -37,10 +37,20 @@ def compute_volatility(prices, window=60):
     return vol
 
 
-def compute_factor_scores(prices, fundamentals, as_of_date=None):
+def compute_factor_scores(prices, fundamentals, as_of_date=None, factor_weights=None):
     """
     Compute composite factor scores for every stock as of a given date.
     Uses only data available up to that date (no lookahead).
+
+    Parameters
+    ----------
+    factor_weights : optional dict mapping each factor column name to a
+        relative weight, e.g. {"value_score": 2, "momentum_score": 1,
+        "size_score": 1, "quality_score": 1, "lowvol_score": 1}.
+        If None (default), all 5 factors are equal-weighted -- this
+        preserves the original behavior for the main dashboard, which
+        does not pass this argument. Used by the self-serve "Build Your
+        Own Portfolio" tab to let a user set their own factor tilts.
 
     Returns a DataFrame indexed by ticker with individual factor z-scores
     and a combined 'composite_score' column.
@@ -81,9 +91,21 @@ def compute_factor_scores(prices, fundamentals, as_of_date=None):
     # --- Low-Vol: lower volatility = better ---
     df["lowvol_score"] = zscore(-df["volatility_raw"])
 
-    # --- Composite: equal-weight blend of all 5 factors ---
+    # --- Composite: weighted blend of all 5 factors ---
     factor_cols = ["value_score", "momentum_score", "size_score", "quality_score", "lowvol_score"]
-    df["composite_score"] = df[factor_cols].mean(axis=1)
+
+    if factor_weights is None:
+        # Original behavior: equal-weight blend
+        df["composite_score"] = df[factor_cols].mean(axis=1)
+    else:
+        weights_series = pd.Series(factor_weights).reindex(factor_cols).fillna(0)
+        total_weight = weights_series.sum()
+        if total_weight == 0:
+            # Guard against a user setting every slider to 0 -- fall back
+            # to equal-weight rather than dividing by zero.
+            df["composite_score"] = df[factor_cols].mean(axis=1)
+        else:
+            df["composite_score"] = (df[factor_cols] * weights_series).sum(axis=1) / total_weight
 
     return df.sort_values("composite_score", ascending=False)
 

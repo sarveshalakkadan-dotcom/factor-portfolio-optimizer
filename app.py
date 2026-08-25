@@ -22,6 +22,7 @@ from optimizer import optimize_portfolio
 from backtest import run_backtest
 from risk_metrics import full_risk_report, to_returns, factor_exposure
 from forensic_score import run_forensic_check
+from data_pipeline import fetch_custom_universe
 
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -108,7 +109,9 @@ weights = get_optimized_weights(scores, prices, risk_aversion, max_stock_weight,
 st.title("📊 Factor-Based Portfolio Optimizer")
 st.caption("Multi-factor stock scoring → risk-constrained optimization → backtested performance → risk analytics")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Current Portfolio", "Factor Scores", "Backtest Performance", "Risk Analytics"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["Current Portfolio", "Factor Scores", "Backtest Performance", "Risk Analytics", "Build Your Own Portfolio"]
+)
 
 # ---------------- Tab 1: Current Portfolio ----------------
 with tab1:
@@ -243,3 +246,160 @@ with tab4:
     fig5 = go.Figure(data=[go.Histogram(x=port_returns.values * 100, nbinsx=30, marker_color="#2E86AB")])
     fig5.update_layout(height=300, xaxis_title="Monthly Return (%)", yaxis_title="Frequency")
     st.plotly_chart(fig5, use_container_width=True)
+
+# ---------------- Tab 5: Build Your Own Portfolio ----------------
+with tab5:
+    st.subheader("Build Your Own Factor Portfolio")
+    st.caption(
+        "Paste any list of tickers, set your own factor tilts, and this tab pulls "
+        "live data, scores it, optimizes it, and backtests it — just for you."
+    )
+
+    if "custom_prices" not in st.session_state:
+        st.session_state.custom_prices = None
+        st.session_state.custom_fundamentals = None
+        st.session_state.custom_weights = None
+        st.session_state.custom_scores = None
+        st.session_state.custom_backtest = None
+
+    with st.form("custom_universe_form"):
+        ticker_input = st.text_area(
+            "Paste tickers (comma, space, or newline separated)",
+            placeholder="AAPL, MSFT, NVDA, JPM, XOM, ...",
+            height=100,
+        )
+        fetch_submitted = st.form_submit_button("Fetch Live Data")
+
+    if fetch_submitted:
+        raw_tickers = [t.strip() for t in ticker_input.replace(",", " ").replace("\n", " ").split(" ") if t.strip()]
+        if len(raw_tickers) < 5:
+            st.error(
+                "Please enter at least 5 tickers. Fewer than that, combined with the "
+                "sector concentration limit, often makes the optimizer infeasible."
+            )
+        else:
+            try:
+                with st.spinner(f"Pulling live price + fundamental data for {len(raw_tickers)} tickers... "
+                                 f"this can take a minute for a larger watchlist."):
+                    custom_prices, custom_fundamentals = fetch_custom_universe(raw_tickers)
+                st.session_state.custom_prices = custom_prices
+                st.session_state.custom_fundamentals = custom_fundamentals
+                # Clear any previously-built portfolio from a prior ticker list
+                st.session_state.custom_weights = None
+                st.session_state.custom_scores = None
+                st.session_state.custom_backtest = None
+                st.success(f"Loaded live data for {custom_fundamentals.shape[0]} valid tickers.")
+            except ValueError as e:
+                st.error(str(e))
+            except Exception as e:
+                st.error(f"Something went wrong pulling data: {e}")
+
+    if st.session_state.custom_prices is not None:
+        custom_prices = st.session_state.custom_prices
+        custom_fundamentals = st.session_state.custom_fundamentals
+
+        st.markdown("---")
+        st.markdown("**Set your factor tilts**")
+        st.caption(
+            "Higher = more influence on the composite score. These are relative "
+            "weights, not percentages — they don't need to add up to 100."
+        )
+
+        fc1, fc2, fc3, fc4, fc5 = st.columns(5)
+        w_value = fc1.slider("Value", 0, 100, 20, key="custom_w_value")
+        w_momentum = fc2.slider("Momentum", 0, 100, 20, key="custom_w_momentum")
+        w_size = fc3.slider("Size", 0, 100, 20, key="custom_w_size")
+        w_quality = fc4.slider("Quality", 0, 100, 20, key="custom_w_quality")
+        w_lowvol = fc5.slider("Low-Vol", 0, 100, 20, key="custom_w_lowvol")
+
+        custom_factor_weights = {
+            "value_score": w_value,
+            "momentum_score": w_momentum,
+            "size_score": w_size,
+            "quality_score": w_quality,
+            "lowvol_score": w_lowvol,
+        }
+
+        custom_risk_label = st.select_slider(
+            "Risk Tolerance",
+            options=["Aggressive", "Moderate-Aggressive", "Balanced", "Moderate-Conservative", "Conservative"],
+            value="Balanced",
+            key="custom_risk_label",
+        )
+        custom_risk_aversion = risk_map[custom_risk_label]
+
+        build_clicked = st.button("Build My Portfolio", type="primary")
+
+        if build_clicked:
+            try:
+                with st.spinner("Scoring, optimizing, and backtesting your custom portfolio..."):
+                    custom_scores = compute_factor_scores(
+                        custom_prices, custom_fundamentals, factor_weights=custom_factor_weights
+                    )
+                    custom_weights = optimize_portfolio(
+                        custom_scores, custom_prices, risk_aversion=custom_risk_aversion
+                    )
+                    custom_backtest = run_backtest(
+                        custom_prices, custom_fundamentals,
+                        risk_aversion=custom_risk_aversion,
+                        factor_weights=custom_factor_weights,
+                    )
+                st.session_state.custom_scores = custom_scores
+                st.session_state.custom_weights = custom_weights
+                st.session_state.custom_backtest = custom_backtest
+            except Exception as e:
+                st.error(
+                    f"Couldn't build a portfolio from this universe: {e}\n\n"
+                    "This is often the optimizer failing to find a feasible solution — "
+                    "try a larger or more sector-diverse ticker list."
+                )
+
+        if st.session_state.custom_weights is not None:
+            custom_scores = st.session_state.custom_scores
+            custom_weights = st.session_state.custom_weights
+            custom_backtest = st.session_state.custom_backtest
+
+            st.markdown("---")
+            cc1, cc2 = st.columns([1, 1])
+
+            with cc1:
+                st.subheader("Optimized Holdings")
+                holdings_df_c = pd.DataFrame({"Weight": custom_weights})
+                holdings_df_c["Sector"] = custom_scores.loc[holdings_df_c.index, "sector"]
+                holdings_df_c["Factor Score"] = custom_scores.loc[holdings_df_c.index, "composite_score"].round(3)
+                holdings_df_c["Weight"] = (holdings_df_c["Weight"] * 100).round(2).astype(str) + "%"
+                st.dataframe(holdings_df_c, use_container_width=True, height=350)
+
+            with cc2:
+                st.subheader("Sector Allocation")
+                sector_alloc_c = pd.DataFrame({"weight": custom_weights})
+                sector_alloc_c["sector"] = custom_scores.loc[sector_alloc_c.index, "sector"]
+                sector_summary_c = sector_alloc_c.groupby("sector")["weight"].sum().sort_values(ascending=False)
+                fig_c = go.Figure(data=[go.Pie(labels=sector_summary_c.index, values=sector_summary_c.values, hole=0.4)])
+                fig_c.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350)
+                st.plotly_chart(fig_c, use_container_width=True)
+
+            st.markdown("---")
+            st.subheader("Backtest: Your Portfolio vs S&P 500")
+            cport = custom_backtest["portfolio_value"]
+            cbench = custom_backtest["benchmark_value"]
+
+            fig_bt = go.Figure()
+            fig_bt.add_trace(go.Scatter(x=cport.index, y=cport.values, name="Your Strategy",
+                                          line=dict(color="#2E86AB", width=2.5)))
+            fig_bt.add_trace(go.Scatter(x=cbench.index, y=cbench.values, name="S&P 500 (Benchmark)",
+                                          line=dict(color="#888888", width=2, dash="dash")))
+            fig_bt.update_layout(title="Cumulative Growth of $1", height=400,
+                                   yaxis_title="Portfolio Value", xaxis_title="Date")
+            st.plotly_chart(fig_bt, use_container_width=True)
+
+            if len(cport) > 1:
+                total_ret_c = cport.iloc[-1] / cport.iloc[0] - 1
+                total_ret_cb = cbench.iloc[-1] / cbench.iloc[0] - 1
+                years_c = (cport.index[-1] - cport.index[0]).days / 365.25
+                if years_c > 0:
+                    cagr_c = (cport.iloc[-1] / cport.iloc[0]) ** (1 / years_c) - 1
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Your Strategy Total Return", f"{total_ret_c*100:+.1f}%")
+                    m2.metric("Benchmark Total Return", f"{total_ret_cb*100:+.1f}%")
+                    m3.metric("Your Strategy CAGR", f"{cagr_c*100:+.2f}%")

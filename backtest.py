@@ -29,7 +29,7 @@ def get_rebalance_dates(prices, freq="ME"):
 
 
 def run_backtest(prices, fundamentals, risk_aversion=3.0, freq="ME",
-                  lookback_buffer=270, cost_bps=10):
+                  lookback_buffer=270, cost_bps=10, factor_weights=None):
     """
     Walk forward through time, rebalancing monthly.
 
@@ -37,6 +37,11 @@ def run_backtest(prices, fundamentals, risk_aversion=3.0, freq="ME",
     ----------
     cost_bps : transaction cost in basis points applied to turnover each
                rebalance (10 bps = 0.10%, a realistic institutional estimate)
+    factor_weights : optional dict of factor -> weight, passed straight
+               through to compute_factor_scores() at every rebalance. If
+               None (default), behaves exactly as before (equal-weight).
+               Lets the self-serve "Build Your Own Portfolio" tab backtest
+               a user's custom factor tilts, not just the default blend.
 
     Returns
     -------
@@ -62,7 +67,8 @@ def run_backtest(prices, fundamentals, risk_aversion=3.0, freq="ME",
         # --- Score stocks using ONLY data up to rebal_date (no lookahead) ---
         price_hist_to_date = prices.loc[:rebal_date]
         try:
-            scores = compute_factor_scores(price_hist_to_date, fundamentals, as_of_date=rebal_date)
+            scores = compute_factor_scores(price_hist_to_date, fundamentals,
+                                            as_of_date=rebal_date, factor_weights=factor_weights)
             new_weights = optimize_portfolio(scores, price_hist_to_date, risk_aversion=risk_aversion)
         except Exception as e:
             print(f"  Skipping rebalance at {rebal_date.date()} due to error: {e}")

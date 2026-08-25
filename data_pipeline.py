@@ -67,6 +67,43 @@ def fetch_fundamentals(tickers):
     return pd.DataFrame(records).set_index("ticker")
 
 
+def fetch_custom_universe(tickers, start=START_DATE, end=END_DATE):
+    """
+    Fetch live price + fundamental data for a user-supplied ticker list.
+
+    Reuses fetch_prices() and fetch_fundamentals() unchanged -- this just
+    wraps them for an arbitrary watchlist and returns the data in-memory,
+    instead of the fixed 60-stock UNIVERSE that build_dataset() saves to
+    CSV. Used by the "Build Your Own Portfolio" self-serve tab.
+
+    Parameters
+    ----------
+    tickers : list of ticker strings as typed by the user, e.g. from a
+              text box (case and whitespace are normalized automatically)
+
+    Returns
+    -------
+    prices, fundamentals : same shape/format as build_dataset(), ready to
+        pass straight into compute_factor_scores(), optimize_portfolio(),
+        and run_backtest() unchanged.
+    """
+    clean_tickers = sorted(set(t.strip().upper() for t in tickers if t.strip()))
+    if not clean_tickers:
+        raise ValueError("No valid tickers provided.")
+
+    prices = fetch_prices(clean_tickers, start=start, end=end)
+    valid_tickers = [t for t in prices.columns if t != BENCHMARK]
+
+    if not valid_tickers:
+        raise ValueError(
+            "None of the provided tickers returned usable price data. "
+            "Check for typos or delisted tickers."
+        )
+
+    fundamentals = fetch_fundamentals(valid_tickers)
+    return prices, fundamentals
+
+
 def build_dataset(save=True):
     os.makedirs(DATA_DIR, exist_ok=True)
 
